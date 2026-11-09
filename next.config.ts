@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  serverExternalPackages: ["typeorm", "reflect-metadata", "pg"],
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {

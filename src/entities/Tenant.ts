@@ -1,23 +1,30 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from "typeorm";
-import { Usuario } from "./Usuario";
+import type { Usuario } from "./Usuario";
 
+/**
+ * ENTIDAD GLOBAL: `Tenant` (Clínica Médica)
+ * Vive siempre en el schema compartido `public.tenants`.
+ * Guarda el nombre de la clínica, su identificador URL (`slug`) y el nombre
+ * físico del schema en PostgreSQL (`schema_name`, ej. `tenant_clinica_sanitas`).
+ */
 @Entity({ name: "tenants", schema: "public" })
 export class Tenant {
   @PrimaryGeneratedColumn("uuid")
-  id: string;
+  id!: string;
 
   @Column({ type: "varchar", length: 255 })
-  nombre: string;
+  nombre!: string;
 
   @Column({ type: "varchar", length: 100, unique: true })
-  slug: string;
+  slug!: string;
 
   @Column({ type: "varchar", length: 100, unique: true, name: "schema_name" })
-  schemaName: string; // Ej: "tenant_clinica_sanitas"
+  schemaName!: string; // Ej: "tenant_clinica_sanitas"
 
-  @CreateDateColumn({ name: "created_at" })
-  createdAt: Date;
+  @CreateDateColumn({ name: "created_at", type: "timestamp" })
+  createdAt!: Date;
 
-  @OneToMany(() => Usuario, (usuario) => usuario.tenant)
-  usuarios: Usuario[];
+  // Usamos el nombre de la entidad en string ("Usuario") para evitar dependencias circulares en Turbopack
+  @OneToMany("Usuario", (usuario: Usuario) => usuario.tenant)
+  usuarios!: Usuario[];
 }

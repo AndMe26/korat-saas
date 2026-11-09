@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Korat Health SaaS — Plataforma Multitenant para Clínicas Médicas
 
-## Getting Started
+Plataforma SaaS Fullstack construida con **Next.js 16 (App Router)**, **TypeScript**, **TypeORM** y **PostgreSQL (Supabase / Docker)** bajo una arquitectura de aislamiento físico **Schema-per-Tenant**.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 1. Arquitectura Multitenant (`Schema-per-Tenant`)
+
+Cada clínica registrada recibe automáticamente su propio esquema aislado en PostgreSQL (`tenant_<slug>`):
+
+* **Esquema Compartido (`public`):**
+  * `public.tenants`: Clínicas registradas (`id`, `nombre`, `slug`, `schema_name`).
+  * `public.usuarios`: Médicos y administradores (`id`, `nombre`, `email`, `password_hash`, `rol`, `tenant_id`).
+  * `public.idempotency_keys`: Almacén de llaves `Idempotency-Key` con respuesta cacheada (`JSONB`) y expiración (`expires_at`).
+* **Esquema Dinámico por Clínica (`tenant_<slug>`):**
+  * `pacientes`: Pacientes de la clínica (`id`, `nombre`, `documento` único por clínica, `telefono`, `email`).
+  * `profesionales`: Cuerpo médico (`id`, `nombre`, `especialidad`, `telefono`, `activo`).
+  * `citas`: Agenda médica (`id`, `fecha_hora`, `motivo`, `estado`, `resumen_ia`, `paciente_id`, `profesional_id`).
+
+### ¿Cómo se garantiza el aislamiento entre clínicas?
+En [`src/lib/db.ts`](src/lib/db.ts), la función `withTenantSchema(schemaName, callback)` abre una transacción SQL con un `QueryRunner` dedicado y ejecuta:
+```sql
+SET LOCAL search_path TO "tenant_clinica_xyz", public;
 ```
+El modificador `LOCAL` garantiza que el cambio de esquema viva **únicamente durante esa transacción**, evitando fugas de datos en el pool de conexiones de Supabase o PostgreSQL.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 2. Decisiones Técnicas y Rúbrica
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. **Autenticación Segura (`JWT + Cookie httpOnly`):**
+   * Firmado con `jose` (`HS256`) en [`src/lib/auth.ts`](src/lib/auth.ts) y almacenado en la cookie `korat_session` con banderas `httpOnly`, `SameSite=Lax` y `Secure`.
+   * Resolución del tenant directamente desde el payload firmado del JWT en [`src/proxy.ts`](src/proxy.ts).
+2. **Idempotencia (`Idempotency-Key`):**
+   * Implementada en [`src/lib/idempotency.ts`](src/lib/idempotency.ts). Exigida en `POST /api/auth/register` y `POST /api/v1/citas`. Si se repite una petición con la misma clave antes de 24 horas, retorna la respuesta guardada con el header `X-Idempotent-Replayed: true`.
+3. **Rate Limiting (`Sliding Window`):**
+   * Implementado en [`src/lib/rate-limit.ts`](src/lib/rate-limit.ts). Protege `POST /api/auth/login` (máx. 5 intentos/minuto por IP) y los endpoints `POST` de negocio por `tenantId`, respondiendo `429 Too Many Requests` con el header `Retry-After`.
+4. **Tres Estrategias de Renderizado en Next.js:**
+   * **SSG (Static Site Generation):** Landing Page comercial en [`src/app/page.tsx`](src/app/page.tsx).
+   * **SSR (Server-Side Rendering):** Resumen ejecutivo con métricas en tiempo real en [`src/app/dashboard/page.tsx`](src/app/dashboard/page.tsx).
+   * **CSR (Client-Side Rendering):** Módulos interactivos en `/dashboard/pacientes`, `/dashboard/profesionales` y `/dashboard/citas`.
+5. **Asistente Clínico con IA (Google Gemini):**
+   * Endpoint `POST /api/v1/ai/clinical-assistant` que sugiere prioridad de triage y preparación clínica a partir del motivo de consulta.
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## 3. Ejecución Local y con Docker
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Con Supabase / Node.js local
+```bash
+npm install
+npm run dev
+```
+Abrir `http://localhost:3000`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Con Docker Compose (App + PostgreSQL 16)
+```bash
+docker compose up --build
+```
